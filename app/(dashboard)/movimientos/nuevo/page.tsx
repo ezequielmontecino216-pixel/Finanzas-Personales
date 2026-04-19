@@ -68,21 +68,21 @@ export default function NuevoMovimientoPage() {
         fecha: form.fecha,
         creado_por_ia: false,
       })
-      if (error) throw error
+      if (error) throw new Error(error.message + ' (code: ' + error.code + ')')
 
       // Actualizar saldo de la cuenta
       if (form.cuenta_id) {
         const cuenta = cuentas.find(c => c.id === form.cuenta_id)
         if (cuenta) {
           const delta = form.tipo === 'ingreso' ? monto : -monto
-          await supabase.from('cuentas').update({ saldo_actual: cuenta.saldo_actual + delta }).eq('id', form.cuenta_id)
+          await supabase.from('cuentas').update({ saldo_actual: Number(cuenta.saldo_actual) + delta }).eq('id', form.cuenta_id)
         }
       }
 
       router.push('/movimientos')
-    } catch (err) {
+    } catch (err: any) {
       console.error(err)
-      alert('Error al guardar')
+      alert('Error al guardar: ' + (err?.message || JSON.stringify(err)))
     } finally {
       setLoading(false)
     }
