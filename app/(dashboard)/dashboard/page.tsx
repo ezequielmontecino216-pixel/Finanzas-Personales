@@ -212,7 +212,7 @@ export default async function DashboardPage() {
       </div>
 
       {/* Saldo + Ahorros */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+      <div className="grid-2col">
 
         {/* Saldo para gastar */}
         <div style={{ background: '#111827', border: '1px solid rgba(255,255,255,0.06)', borderRadius: 16, padding: 22 }}>
@@ -293,7 +293,7 @@ export default async function DashboardPage() {
       )}
 
       {/* Gastos fijos + Cuotas */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+      <div className="grid-2col">
 
         {/* Gastos fijos — componente interactivo */}
         <GastosFijosCard

@@ -179,3 +179,68 @@ input:focus, select:focus, textarea:focus {
   font-variant-numeric: tabular-nums;
   font-feature-settings: "tnum";
 }
+
+/* ─── RESPONSIVE LAYOUT ──────────────────────────────────────────────────── */
+.sidebar-desktop {
+  display: flex !important;
+}
+
+.bottom-nav {
+  display: none !important;
+}
+
+.main-content {
+  margin-left: 240px;
+  padding: 40px;
+}
+
+.grid-2col {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+}
+
+.grid-3col {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 12px;
+}
+
+@media (max-width: 768px) {
+  .sidebar-desktop {
+    display: none !important;
+  }
+
+  .bottom-nav {
+    display: flex !important;
+  }
+
+  .main-content {
+    margin-left: 0 !important;
+    padding: 20px 16px 90px !important;
+  }
+
+  .grid-2col {
+    grid-template-columns: 1fr !important;
+  }
+
+  .grid-3col {
+    grid-template-columns: repeat(3, 1fr) !important;
+  }
+
+  /* Texto más grande para touch */
+  h1 { font-size: 22px !important; }
+}
+
+/* ─── CHAT ───────────────────────────────────────────────────────────────── */
+.chat-container {
+  display: flex;
+  flex-direction: column;
+  height: calc(100vh - 180px);
+}
+
+@media (max-width: 768px) {
+  .chat-container {
+    height: calc(100dvh - 180px);
+  }
+}

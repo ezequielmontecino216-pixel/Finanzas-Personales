@@ -15,11 +15,11 @@ export function Sidebar() {
   const pathname = usePathname()
 
   return (
-    <aside style={{
+    <aside className="sidebar-desktop" style={{
       position: 'fixed', inset: '0 auto 0 0', width: '240px',
       background: '#0d1120',
       borderRight: '1px solid rgba(255,255,255,0.05)',
-      display: 'flex', flexDirection: 'column', zIndex: 50,
+      flexDirection: 'column', zIndex: 50,
     }}>
 
       {/* Logo */}
