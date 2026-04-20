@@ -4,6 +4,7 @@ import { createServerClient } from '@/lib/supabase/client'
 import { GastosCategoriaChart } from '@/components/dashboard/GastosCategoriaChart'
 import { GastosFijosCard } from '@/components/dashboard/GastosFijosCard'
 import { CuotasCard } from '@/components/dashboard/CuotasCard'
+import { AhorrosCard } from '@/components/dashboard/AhorrosCard'
 import Link from 'next/link'
 
 const fmt = (n: number) =>
@@ -246,26 +247,19 @@ export default async function DashboardPage() {
           </div>
         </div>
 
-        {/* Ahorros */}
-        <div style={{ background: '#111827', border: '1px solid rgba(255,255,255,0.06)', borderRadius: 16, padding: 22 }}>
-          <p style={{ fontSize: 11, fontWeight: 600, color: 'rgba(248,250,252,0.35)', textTransform: 'uppercase', letterSpacing: '0.06em', margin: '0 0 12px' }}>
-            Ahorros
-          </p>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-            <div style={{ background: 'rgba(34,197,94,0.06)', border: '1px solid rgba(34,197,94,0.12)', borderRadius: 10, padding: '12px 14px' }}>
-              <p style={{ fontSize: 11, color: 'rgba(248,250,252,0.35)', margin: '0 0 4px' }}>Pesos ARS</p>
-              <p style={{ fontSize: 22, fontWeight: 800, color: ahorroARS > 0 ? '#22c55e' : 'rgba(248,250,252,0.2)', margin: 0, letterSpacing: '-0.02em', fontVariantNumeric: 'tabular-nums' }}>
-                {fmt(ahorroARS)}
-              </p>
-            </div>
-            <div style={{ background: 'rgba(34,197,94,0.06)', border: '1px solid rgba(34,197,94,0.12)', borderRadius: 10, padding: '12px 14px' }}>
-              <p style={{ fontSize: 11, color: 'rgba(248,250,252,0.35)', margin: '0 0 4px' }}>Dólares USD</p>
-              <p style={{ fontSize: 22, fontWeight: 800, color: ahorroUSD > 0 ? '#22c55e' : 'rgba(248,250,252,0.2)', margin: 0, letterSpacing: '-0.02em', fontVariantNumeric: 'tabular-nums' }}>
-                u$d {ahorroUSD.toLocaleString('es-AR', { minimumFractionDigits: 2 })}
-              </p>
-            </div>
-          </div>
-        </div>
+        {/* Ahorros — componente interactivo */}
+        <AhorrosCard
+          ahorroARS={ahorroARS}
+          ahorroUSD={ahorroUSD}
+          cuentas={todasCuentas.map((c: any) => ({
+            id: c.id,
+            nombre: c.nombre,
+            icono: c.icono || '💳',
+            saldo_actual: Number(c.saldo_actual),
+            moneda: c.moneda || 'ARS',
+          }))}
+          usuarioId={uid}
+        />
       </div>
 
       {/* Cuentas con saldo */}
