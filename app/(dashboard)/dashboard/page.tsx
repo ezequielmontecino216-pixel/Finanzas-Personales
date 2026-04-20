@@ -50,6 +50,8 @@ export default async function DashboardPage() {
     .eq('clerk_user_id', userId)
     .single()
 
+  const esUsuarioNuevo = !usuario
+
   if (!usuario) {
     const { data: nuevo } = await supabase
       .from('usuarios')
@@ -66,44 +68,25 @@ export default async function DashboardPage() {
   if (!usuario) redirect('/sign-in')
   const uid = usuario.id
 
-  // ── 2. Seedear gastos fijos si faltan ────────────────────────────────────
-  const { data: gfCheck, error: gfErr } = await supabase
-    .from('gastos_fijos')
-    .select('id')
-    .eq('usuario_id', uid)
-    .limit(1)
-
-  console.log('[SETUP] gastos_fijos check:', gfCheck, gfErr)
-
-  if (!gfCheck || gfCheck.length === 0) {
+  // ── 2. Seed solo para usuarios nuevos ────────────────────────────────────
+  if (esUsuarioNuevo) {
     for (const gf of GASTOS_FIJOS_SEED) {
-      const res = await supabase.from('gastos_fijos').insert({ ...gf, usuario_id: uid })
-      console.log('[SETUP] insert gasto_fijo:', gf.nombre, res.error)
+      await supabase.from('gastos_fijos').insert({ ...gf, usuario_id: uid })
     }
-  }
-
-  // ── 3. Seedear cuotas si faltan ──────────────────────────────────────────
-  const { data: cuotasCheck, error: cuErr } = await supabase
-    .from('cuotas')
-    .select('id')
-    .eq('usuario_id', uid)
-    .limit(1)
-
-  console.log('[SETUP] cuotas check:', cuotasCheck, cuErr)
-
-  if (!cuotasCheck || cuotasCheck.length === 0) {
     for (const cuota of CUOTAS_SEED) {
-      const res = await supabase.from('cuotas').insert({ ...cuota, usuario_id: uid })
-      console.log('[SETUP] insert cuota:', cuota.nombre, res.error)
+      await supabase.from('cuotas').insert({ ...cuota, usuario_id: uid })
     }
-  }
-
-  // ── 4. Seedear ahorros si faltan ─────────────────────────────────────────
-  for (const moneda of ['ARS', 'USD']) {
-    await supabase.from('ahorros').upsert(
-      { usuario_id: uid, moneda, monto: 0 },
-      { onConflict: 'usuario_id,moneda', ignoreDuplicates: true }
-    )
+    for (const moneda of ['ARS', 'USD']) {
+      await supabase.from('ahorros').insert({ usuario_id: uid, moneda, monto: 0 })
+    }
+  } else {
+    // Garantizar que ahorros existan (por si se crearon antes del seed)
+    for (const moneda of ['ARS', 'USD']) {
+      await supabase.from('ahorros').upsert(
+        { usuario_id: uid, moneda, monto: 0 },
+        { onConflict: 'usuario_id,moneda', ignoreDuplicates: true }
+      )
+    }
   }
 
   // ── 5. Cargar todos los datos ────────────────────────────────────────────

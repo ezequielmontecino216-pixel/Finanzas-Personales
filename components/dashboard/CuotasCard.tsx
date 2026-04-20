@@ -1,9 +1,10 @@
 'use client'
 
 import { useState } from 'react'
-import { Plus, Trash2, X } from 'lucide-react'
+import { Plus, Trash2, X, ChevronDown, ChevronUp } from 'lucide-react'
 import { supabase } from '@/lib/supabase/client'
 import { useRouter } from 'next/navigation'
+import { useToast } from '@/components/ui/ToastProvider'
 
 interface Cuota {
   id: string
@@ -27,163 +28,142 @@ const fmt = (n: number) =>
 const inputStyle: React.CSSProperties = {
   background: 'rgba(255,255,255,0.05)',
   border: '1px solid rgba(255,255,255,0.1)',
-  color: '#F8FAFC',
-  borderRadius: 8,
-  padding: '8px 12px',
-  fontSize: 13,
-  width: '100%',
-  outline: 'none',
-  boxSizing: 'border-box',
-  fontFamily: 'inherit',
+  color: '#F8FAFC', borderRadius: 8, padding: '8px 12px',
+  fontSize: 13, width: '100%', outline: 'none',
+  boxSizing: 'border-box', fontFamily: 'inherit',
 }
 
 export function CuotasCard({ cuotas: initialCuotas, usuarioId, fechaVencimiento }: Props) {
   const router = useRouter()
+  const { toast } = useToast()
+
   const [cuotas, setCuotas] = useState<Cuota[]>(initialCuotas)
-  const [showForm, setShowForm] = useState(false)
+  // IDs pagadas en esta sesión (para fade-out)
+  const [pagadasSesion, setPagadasSesion] = useState<Set<string>>(new Set())
+  const [animatingOut, setAnimatingOut] = useState<Set<string>>(new Set())
+  const [showOcultas, setShowOcultas] = useState(false)
   const [paying, setPaying] = useState<string | null>(null)
+  const [showForm, setShowForm] = useState(false)
   const [deleting, setDeleting] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
   const [form, setForm] = useState({
-    nombre: '',
-    monto_por_cuota: '',
-    cuotas_pagadas: '0',
-    total_cuotas: '',
-    dia_vencimiento: '11',
+    nombre: '', monto_por_cuota: '', cuotas_pagadas: '0', total_cuotas: '', dia_vencimiento: '11',
   })
 
-  // Cuotas que aún tienen pagos pendientes
-  const cuotasActivas = cuotas.filter(c =>
-    c.activo !== false && !(c.total_cuotas && c.cuotas_pagadas >= c.total_cuotas)
-  )
-  const totalMes = cuotasActivas.reduce((s, c) => s + Number(c.monto_por_cuota), 0)
+  // Pendientes: activas, no completadas, no pagadas esta sesión
+  const esCompletada = (c: Cuota) => c.total_cuotas != null && c.cuotas_pagadas >= c.total_cuotas
+  const pendientes = cuotas.filter(c => !esCompletada(c) && c.activo !== false && !pagadasSesion.has(c.id))
+  const ocultas = cuotas.filter(c => esCompletada(c) || pagadasSesion.has(c.id))
+  const totalMes = pendientes.reduce((s, c) => s + Number(c.monto_por_cuota), 0)
 
-  // ── Marcar cuota como pagada ─────────────────────────────────────────────
   async function pagarCuota(cuota: Cuota) {
+    if (paying) return
     setPaying(cuota.id)
     try {
-      const nuevasCuotasPagadas = cuota.cuotas_pagadas + 1
-      const terminada = cuota.total_cuotas != null && nuevasCuotasPagadas >= cuota.total_cuotas
+      const nuevasPagadas = cuota.cuotas_pagadas + 1
+      const terminada = cuota.total_cuotas != null && nuevasPagadas >= cuota.total_cuotas
+
+      // Animación de salida
+      setAnimatingOut(prev => new Set([...prev, cuota.id]))
 
       await supabase.from('cuotas').update({
-        cuotas_pagadas: nuevasCuotasPagadas,
-        activo: !terminada,
+        cuotas_pagadas: nuevasPagadas, activo: !terminada,
       }).eq('id', cuota.id)
 
-      // Registrar transacción del pago
       await supabase.from('transacciones').insert({
-        usuario_id: usuarioId,
-        tipo: 'gasto',
-        subtipo: 'cuota',
-        categoria: 'Cuota',
-        descripcion: cuota.nombre,
-        monto: cuota.monto_por_cuota,
-        moneda: 'ARS',
-        fecha: new Date().toISOString().split('T')[0],
-        creado_por_ia: false,
+        usuario_id: usuarioId, tipo: 'gasto', subtipo: 'cuota',
+        categoria: 'Cuota', descripcion: cuota.nombre,
+        monto: cuota.monto_por_cuota, moneda: 'ARS',
+        fecha: new Date().toISOString().split('T')[0], creado_por_ia: false,
       })
 
-      setCuotas(prev => prev.map(c =>
-        c.id === cuota.id
-          ? { ...c, cuotas_pagadas: nuevasCuotasPagadas, activo: !terminada }
-          : c
-      ))
+      setTimeout(() => {
+        setAnimatingOut(prev => { const s = new Set(prev); s.delete(cuota.id); return s })
+        setCuotas(prev => prev.map(c =>
+          c.id === cuota.id ? { ...c, cuotas_pagadas: nuevasPagadas, activo: !terminada } : c
+        ))
+        setPagadasSesion(prev => new Set([...prev, cuota.id]))
+      }, 360)
+
+      if (terminada) {
+        toast(`🎉 ¡${cuota.nombre} completamente pagada!`, 'success')
+      } else {
+        toast(`${cuota.nombre} — cuota ${nuevasPagadas}${cuota.total_cuotas ? `/${cuota.total_cuotas}` : ''} pagada`, 'success')
+      }
       router.refresh()
-    } catch (err) {
-      console.error(err)
+    } catch {
+      setAnimatingOut(prev => { const s = new Set(prev); s.delete(cuota.id); return s })
+      toast('No se pudo registrar el pago', 'error')
     } finally {
       setPaying(null)
     }
   }
 
-  // ── Desmarcar (revertir último pago) ────────────────────────────────────
   async function despagarCuota(cuota: Cuota) {
-    if (cuota.cuotas_pagadas <= 0) return
+    if (cuota.cuotas_pagadas <= 0 || paying) return
     setPaying(cuota.id)
     try {
-      const nuevasCuotasPagadas = cuota.cuotas_pagadas - 1
+      const nuevasPagadas = cuota.cuotas_pagadas - 1
       await supabase.from('cuotas').update({
-        cuotas_pagadas: nuevasCuotasPagadas,
-        activo: true,
+        cuotas_pagadas: nuevasPagadas, activo: true,
       }).eq('id', cuota.id)
-
       setCuotas(prev => prev.map(c =>
-        c.id === cuota.id
-          ? { ...c, cuotas_pagadas: nuevasCuotasPagadas, activo: true }
-          : c
+        c.id === cuota.id ? { ...c, cuotas_pagadas: nuevasPagadas, activo: true } : c
       ))
+      setPagadasSesion(prev => { const s = new Set(prev); s.delete(cuota.id); return s })
+      toast(`${cuota.nombre} desmarcada`, 'info')
       router.refresh()
-    } catch (err) {
-      console.error(err)
+    } catch {
+      toast('No se pudo desmarcar', 'error')
     } finally {
       setPaying(null)
     }
   }
 
-  // ── Agregar cuota ────────────────────────────────────────────────────────
   async function agregarCuota() {
     if (!form.nombre.trim() || !form.monto_por_cuota) return
     setSaving(true)
     try {
-      const { data, error } = await supabase
-        .from('cuotas')
-        .insert({
-          usuario_id: usuarioId,
-          nombre: form.nombre.trim(),
-          monto_por_cuota: parseFloat(form.monto_por_cuota),
-          cuotas_pagadas: parseInt(form.cuotas_pagadas) || 0,
-          total_cuotas: form.total_cuotas ? parseInt(form.total_cuotas) : null,
-          dia_vencimiento: parseInt(form.dia_vencimiento) || 11,
-          activo: true,
-        })
-        .select()
-        .single()
-
+      const { data, error } = await supabase.from('cuotas').insert({
+        usuario_id: usuarioId, nombre: form.nombre.trim(),
+        monto_por_cuota: parseFloat(form.monto_por_cuota),
+        cuotas_pagadas: parseInt(form.cuotas_pagadas) || 0,
+        total_cuotas: form.total_cuotas ? parseInt(form.total_cuotas) : null,
+        dia_vencimiento: parseInt(form.dia_vencimiento) || 11,
+        activo: true,
+      }).select().single()
       if (error) throw error
       setCuotas(prev => [...prev, data])
       setForm({ nombre: '', monto_por_cuota: '', cuotas_pagadas: '0', total_cuotas: '', dia_vencimiento: '11' })
       setShowForm(false)
+      toast(`"${data.nombre}" agregada`, 'success')
       router.refresh()
-    } catch (err) {
-      console.error(err)
-      alert('No se pudo agregar. Intentá de nuevo.')
+    } catch {
+      toast('No se pudo agregar', 'error')
     } finally {
       setSaving(false)
     }
   }
 
-  // ── Eliminar cuota ───────────────────────────────────────────────────────
   async function eliminarCuota(id: string) {
+    const nombre = cuotas.find(c => c.id === id)?.nombre || ''
     setDeleting(id)
     try {
       await supabase.from('cuotas').delete().eq('id', id)
       setCuotas(prev => prev.filter(c => c.id !== id))
+      setPagadasSesion(prev => { const s = new Set(prev); s.delete(id); return s })
+      toast(`"${nombre}" eliminada`, 'info')
       router.refresh()
-    } catch (err) {
-      console.error(err)
+    } catch {
+      toast('No se pudo eliminar', 'error')
     } finally {
       setDeleting(null)
     }
   }
 
-  // ── ¿La cuota de este mes ya está pagada? ───────────────────────────────
-  // Consideramos pagada la cuota del mes si cuotas_pagadas > el mínimo esperado
-  // Para simplificar: si fue marcada como pagada en la sesión actual
-  const [pagadasEstaSesion, setPagadasEstaSesion] = useState<Set<string>>(new Set())
-
-  async function toggleCuota(cuota: Cuota) {
-    const estabaPagada = pagadasEstaSesion.has(cuota.id)
-    if (estabaPagada) {
-      await despagarCuota(cuota)
-      setPagadasEstaSesion(prev => { const s = new Set(prev); s.delete(cuota.id); return s })
-    } else {
-      await pagarCuota(cuota)
-      setPagadasEstaSesion(prev => new Set([...prev, cuota.id]))
-    }
-  }
-
   return (
     <div style={{ background: '#111827', border: '1px solid rgba(255,255,255,0.06)', borderRadius: 16, padding: 22 }}>
+
       {/* Header */}
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 }}>
         <div>
@@ -220,56 +200,34 @@ export function CuotasCard({ cuotas: initialCuotas, usuarioId, fechaVencimiento 
             placeholder="¿De qué es la cuota? (ej: Notebook, Ropa...)"
             value={form.nombre}
             onChange={e => setForm(f => ({ ...f, nombre: e.target.value }))}
-            style={inputStyle}
-            autoFocus
+            style={inputStyle} autoFocus
           />
           <div style={{ display: 'flex', gap: 8 }}>
             <div style={{ flex: 1 }}>
               <p style={{ fontSize: 11, color: 'rgba(248,250,252,0.4)', margin: '0 0 4px' }}>Monto por cuota *</p>
-              <input
-                type="number"
-                placeholder="Ej: 25000"
-                value={form.monto_por_cuota}
+              <input type="number" placeholder="Ej: 25000" value={form.monto_por_cuota}
                 onChange={e => setForm(f => ({ ...f, monto_por_cuota: e.target.value }))}
-                style={inputStyle}
-                min="0"
-                required
-              />
+                style={inputStyle} min="0" />
             </div>
             <div style={{ flex: 1 }}>
-              <p style={{ fontSize: 11, color: 'rgba(248,250,252,0.4)', margin: '0 0 4px' }}>Total de cuotas</p>
-              <input
-                type="number"
-                placeholder="Ej: 12 (vacío = sin límite)"
-                value={form.total_cuotas}
+              <p style={{ fontSize: 11, color: 'rgba(248,250,252,0.4)', margin: '0 0 4px' }}>Total cuotas</p>
+              <input type="number" placeholder="Ej: 12" value={form.total_cuotas}
                 onChange={e => setForm(f => ({ ...f, total_cuotas: e.target.value }))}
-                style={inputStyle}
-                min="1"
-              />
+                style={inputStyle} min="1" />
             </div>
           </div>
           <div style={{ display: 'flex', gap: 8 }}>
             <div style={{ flex: 1 }}>
-              <p style={{ fontSize: 11, color: 'rgba(248,250,252,0.4)', margin: '0 0 4px' }}>Cuotas ya pagadas</p>
-              <input
-                type="number"
-                placeholder="0"
-                value={form.cuotas_pagadas}
+              <p style={{ fontSize: 11, color: 'rgba(248,250,252,0.4)', margin: '0 0 4px' }}>Ya pagadas</p>
+              <input type="number" placeholder="0" value={form.cuotas_pagadas}
                 onChange={e => setForm(f => ({ ...f, cuotas_pagadas: e.target.value }))}
-                style={inputStyle}
-                min="0"
-              />
+                style={inputStyle} min="0" />
             </div>
             <div style={{ flex: 1 }}>
-              <p style={{ fontSize: 11, color: 'rgba(248,250,252,0.4)', margin: '0 0 4px' }}>Día de vencimiento</p>
-              <input
-                type="number"
-                placeholder="11"
-                value={form.dia_vencimiento}
+              <p style={{ fontSize: 11, color: 'rgba(248,250,252,0.4)', margin: '0 0 4px' }}>Día vencimiento</p>
+              <input type="number" placeholder="11" value={form.dia_vencimiento}
                 onChange={e => setForm(f => ({ ...f, dia_vencimiento: e.target.value }))}
-                style={inputStyle}
-                min="1" max="31"
-              />
+                style={inputStyle} min="1" max="31" />
             </div>
           </div>
           <button
@@ -287,111 +245,163 @@ export function CuotasCard({ cuotas: initialCuotas, usuarioId, fechaVencimiento 
         </div>
       )}
 
-      {/* Lista */}
+      {/* Pendientes */}
       <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-        {cuotas.length === 0 ? (
-          <p style={{ fontSize: 13, color: 'rgba(248,250,252,0.3)', textAlign: 'center', padding: '20px 0', margin: 0 }}>
-            Tocá <strong>+ Agregar</strong> para sumar una cuota
-          </p>
+        {pendientes.length === 0 && animatingOut.size === 0 ? (
+          cuotas.length === 0 ? (
+            <p style={{ fontSize: 13, color: 'rgba(248,250,252,0.3)', textAlign: 'center', padding: '20px 0', margin: 0 }}>
+              Tocá <strong>+ Agregar</strong> para sumar una cuota
+            </p>
+          ) : (
+            <p style={{ fontSize: 13, color: '#22c55e', textAlign: 'center', padding: '12px 0', margin: 0 }}>
+              🎉 ¡Todas las cuotas del mes al día!
+            </p>
+          )
         ) : (
-          cuotas.map(cuota => {
-            const terminada = cuota.total_cuotas != null && cuota.cuotas_pagadas >= cuota.total_cuotas
-            const numCuota = cuota.cuotas_pagadas + (terminada ? 0 : 1)
-            const label = cuota.total_cuotas ? `${numCuota}/${cuota.total_cuotas}` : `${numCuota}`
-            const isPaying = paying === cuota.id
-            const isDeleting = deleting === cuota.id
-            const pagadaEstaSesion = pagadasEstaSesion.has(cuota.id)
+          cuotas
+            .filter(c => (!pagadasSesion.has(c.id) && !esCompletada(c) && c.activo !== false) || animatingOut.has(c.id))
+            .map(cuota => {
+              const isAnimating = animatingOut.has(cuota.id)
+              const isPaying = paying === cuota.id
+              const isDeleting = deleting === cuota.id
+              const numCuota = cuota.cuotas_pagadas + 1
+              const label = cuota.total_cuotas ? `${numCuota}/${cuota.total_cuotas}` : `N° ${numCuota}`
 
-            return (
-              <div key={cuota.id} style={{
-                display: 'flex', alignItems: 'center', gap: 8,
-                padding: '9px 10px', borderRadius: 8,
-                background: terminada
-                  ? 'rgba(34,197,94,0.06)'
-                  : pagadaEstaSesion
-                    ? 'rgba(34,197,94,0.06)'
-                    : 'rgba(245,158,11,0.04)',
-                border: terminada || pagadaEstaSesion
-                  ? '1px solid rgba(34,197,94,0.15)'
-                  : '1px solid rgba(245,158,11,0.12)',
-                opacity: isDeleting ? 0.4 : 1,
-                transition: 'all 0.15s',
-              }}>
-                {/* Checkbox */}
-                <button
-                  onClick={() => !terminada && toggleCuota(cuota)}
-                  disabled={isPaying || terminada}
-                  title={terminada ? 'Cuota completada' : pagadaEstaSesion ? 'Desmarcar pago' : 'Marcar como pagada este mes'}
+              return (
+                <div
+                  key={cuota.id}
+                  className={isAnimating ? 'item-slide-out' : 'item-slide-in'}
                   style={{
-                    background: (terminada || pagadaEstaSesion) ? 'rgba(34,197,94,0.2)' : 'rgba(255,255,255,0.05)',
-                    border: (terminada || pagadaEstaSesion) ? '1.5px solid rgba(34,197,94,0.5)' : '1.5px solid rgba(255,255,255,0.15)',
-                    borderRadius: 5, width: 20, height: 20, flexShrink: 0,
-                    cursor: terminada || isPaying ? 'not-allowed' : 'pointer',
-                    display: 'flex', alignItems: 'center', justifyContent: 'center',
-                    fontSize: 11, transition: 'all 0.15s',
-                    color: (terminada || pagadaEstaSesion) ? '#22c55e' : 'transparent',
+                    display: 'flex', alignItems: 'center', gap: 8,
+                    padding: '9px 10px', borderRadius: 8,
+                    background: 'rgba(245,158,11,0.04)',
+                    border: '1px solid rgba(245,158,11,0.1)',
+                    opacity: isDeleting ? 0.4 : 1,
                   }}
                 >
-                  {(terminada || pagadaEstaSesion) ? '✓' : ''}
-                </button>
-
-                {/* Info */}
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <p style={{
-                    fontSize: 13, fontWeight: 600, margin: 0,
-                    color: terminada ? 'rgba(248,250,252,0.4)' : '#F8FAFC',
-                    textDecoration: terminada ? 'line-through' : 'none',
-                    overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-                  }}>
-                    {cuota.nombre}
-                    {terminada && <span style={{ marginLeft: 6, fontSize: 11, color: '#22c55e' }}>✅ Completada</span>}
-                  </p>
-                  <p style={{ fontSize: 11, color: 'rgba(248,250,252,0.35)', margin: '2px 0 0' }}>
-                    Cuota {terminada ? `${cuota.total_cuotas}/${cuota.total_cuotas}` : label}
-                  </p>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <p style={{ fontSize: 13, fontWeight: 600, margin: 0, color: '#F8FAFC', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      {cuota.nombre}
+                    </p>
+                    <p style={{ fontSize: 11, color: 'rgba(248,250,252,0.35)', margin: '2px 0 0' }}>
+                      Cuota {label}
+                    </p>
+                  </div>
+                  <span style={{ fontSize: 13, fontWeight: 700, color: '#F59E0B', fontVariantNumeric: 'tabular-nums', flexShrink: 0 }}>
+                    {fmt(Number(cuota.monto_por_cuota))}
+                  </span>
+                  <button
+                    onClick={() => pagarCuota(cuota)}
+                    disabled={isPaying || isAnimating}
+                    style={{
+                      background: 'rgba(34,197,94,0.08)', border: '1px solid rgba(34,197,94,0.2)',
+                      borderRadius: 6, padding: '3px 9px', fontSize: 11, fontWeight: 600,
+                      color: '#22c55e', cursor: 'pointer', fontFamily: 'inherit',
+                      flexShrink: 0, opacity: isPaying ? 0.5 : 1, transition: 'all 0.15s',
+                    }}
+                  >
+                    ✓ Pagar
+                  </button>
+                  <button
+                    onClick={() => eliminarCuota(cuota.id)} disabled={isDeleting}
+                    style={{
+                      background: 'transparent', border: 'none', cursor: isDeleting ? 'not-allowed' : 'pointer',
+                      color: 'rgba(248,250,252,0.18)', padding: '2px', borderRadius: 4,
+                      display: 'flex', alignItems: 'center', flexShrink: 0,
+                    }}
+                    onMouseEnter={e => (e.currentTarget.style.color = '#ef4444')}
+                    onMouseLeave={e => (e.currentTarget.style.color = 'rgba(248,250,252,0.18)')}
+                  >
+                    <Trash2 size={13} />
+                  </button>
                 </div>
-
-                {/* Monto */}
-                <span style={{
-                  fontSize: 13, fontWeight: 700, color: terminada ? 'rgba(248,250,252,0.3)' : '#F59E0B',
-                  fontVariantNumeric: 'tabular-nums', flexShrink: 0,
-                }}>
-                  {fmt(Number(cuota.monto_por_cuota))}
-                </span>
-
-                {/* Eliminar */}
-                <button
-                  onClick={() => eliminarCuota(cuota.id)}
-                  disabled={isDeleting}
-                  title="Eliminar cuota"
-                  style={{
-                    background: 'transparent', border: 'none', cursor: isDeleting ? 'not-allowed' : 'pointer',
-                    color: 'rgba(248,250,252,0.18)', padding: '2px', borderRadius: 4,
-                    display: 'flex', alignItems: 'center', flexShrink: 0,
-                  }}
-                  onMouseEnter={e => (e.currentTarget.style.color = '#ef4444')}
-                  onMouseLeave={e => (e.currentTarget.style.color = 'rgba(248,250,252,0.18)')}
-                >
-                  <Trash2 size={13} />
-                </button>
-              </div>
-            )
-          })
+              )
+            })
         )}
       </div>
 
-      {/* Total */}
-      {cuotasActivas.length > 0 && (
+      {/* Total pendiente */}
+      {pendientes.length > 0 && (
         <div style={{
           borderTop: '1px solid rgba(255,255,255,0.06)', paddingTop: 10, marginTop: 10,
           display: 'flex', justifyContent: 'space-between', alignItems: 'center',
         }}>
           <span style={{ fontSize: 12, color: 'rgba(248,250,252,0.4)' }}>
-            Total este mes ({cuotasActivas.length} cuota{cuotasActivas.length !== 1 ? 's' : ''})
+            Total este mes ({pendientes.length} cuota{pendientes.length !== 1 ? 's' : ''})
           </span>
           <span style={{ fontSize: 14, fontWeight: 700, color: '#F8FAFC', fontVariantNumeric: 'tabular-nums' }}>
             {fmt(totalMes)}
           </span>
+        </div>
+      )}
+
+      {/* Toggle pagadas/completadas */}
+      {ocultas.length > 0 && (
+        <div style={{ marginTop: 10 }}>
+          <button
+            onClick={() => setShowOcultas(v => !v)}
+            style={{
+              background: 'none', border: 'none', cursor: 'pointer',
+              display: 'flex', alignItems: 'center', gap: 6,
+              color: 'rgba(248,250,252,0.3)', fontSize: 11, fontWeight: 600,
+              padding: '4px 0', fontFamily: 'inherit',
+            }}
+          >
+            {showOcultas ? <ChevronUp size={13} /> : <ChevronDown size={13} />}
+            {showOcultas ? 'Ocultar' : `Ver pagadas/completadas (${ocultas.length})`}
+          </button>
+
+          {showOcultas && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 5, marginTop: 8 }}>
+              {ocultas.map(cuota => {
+                const completada = esCompletada(cuota)
+                return (
+                  <div key={cuota.id} className="item-slide-in" style={{
+                    display: 'flex', alignItems: 'center', gap: 8,
+                    padding: '8px 10px', borderRadius: 8,
+                    background: completada ? 'rgba(34,197,94,0.04)' : 'rgba(34,197,94,0.03)',
+                    border: `1px solid ${completada ? 'rgba(34,197,94,0.15)' : 'rgba(34,197,94,0.08)'}`,
+                  }}>
+                    <div style={{
+                      width: 20, height: 20, borderRadius: 5, flexShrink: 0,
+                      background: 'rgba(34,197,94,0.2)', border: '1.5px solid rgba(34,197,94,0.4)',
+                      display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      fontSize: 11, color: '#22c55e',
+                    }}>✓</div>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <p style={{
+                        fontSize: 13, margin: 0, color: 'rgba(248,250,252,0.3)',
+                        textDecoration: 'line-through', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                      }}>
+                        {cuota.nombre}
+                      </p>
+                      <p style={{ fontSize: 11, color: completada ? '#22c55e' : 'rgba(248,250,252,0.25)', margin: '2px 0 0' }}>
+                        {completada
+                          ? `✅ Completada (${cuota.total_cuotas}/${cuota.total_cuotas})`
+                          : `Cuota ${cuota.cuotas_pagadas}${cuota.total_cuotas ? `/${cuota.total_cuotas}` : ''} — pagada este mes`
+                        }
+                      </p>
+                    </div>
+                    <span style={{ fontSize: 12, color: 'rgba(248,250,252,0.2)', fontVariantNumeric: 'tabular-nums', flexShrink: 0 }}>
+                      {fmt(Number(cuota.monto_por_cuota))}
+                    </span>
+                    {/* Solo permitir desmarcar si fue pagada esta sesión (no completadas definitivas) */}
+                    {!completada && pagadasSesion.has(cuota.id) && (
+                      <button
+                        onClick={() => despagarCuota(cuota)} title="Desmarcar"
+                        style={{
+                          background: 'transparent', border: 'none', cursor: 'pointer',
+                          color: 'rgba(248,250,252,0.2)', fontSize: 13, padding: '2px', fontFamily: 'inherit',
+                        }}
+                        onMouseEnter={e => (e.currentTarget.style.color = '#F59E0B')}
+                        onMouseLeave={e => (e.currentTarget.style.color = 'rgba(248,250,252,0.2)')}
+                      >↩</button>
+                    )}
+                  </div>
+                )
+              })}
+            </div>
+          )}
         </div>
       )}
     </div>

@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabase/client'
 import { useUser } from '@clerk/nextjs'
+import { useToast } from '@/components/ui/ToastProvider'
 
 const CATEGORIAS = [
   'Supermercado', 'Comidas y salidas', 'Transporte', 'Entretenimiento',
@@ -25,6 +26,7 @@ const labelStyle: React.CSSProperties = {
 export default function NuevoMovimientoPage() {
   const { user } = useUser()
   const router = useRouter()
+  const { toast } = useToast()
   const [loading, setLoading] = useState(false)
   const [cuentas, setCuentas] = useState<any[]>([])
   const [usuarioId, setUsuarioId] = useState<string | null>(null)
@@ -79,10 +81,11 @@ export default function NuevoMovimientoPage() {
         }
       }
 
+      toast('Movimiento guardado', 'success')
       router.push('/movimientos')
     } catch (err: any) {
       console.error(err)
-      alert('Error al guardar: ' + (err?.message || JSON.stringify(err)))
+      toast(err?.message || 'Error al guardar', 'error')
     } finally {
       setLoading(false)
     }
