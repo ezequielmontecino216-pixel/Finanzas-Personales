@@ -68,11 +68,13 @@ export default async function MovimientosPage({
 
   const { data: transacciones } = await query
 
-  // Filtrar por mes en JS (más confiable que date filter en PostgREST)
+  // Filtrar por mes en JS — normalizar sp.mes a string simple
+  const mesFilter = sp.mes ? (Array.isArray(sp.mes) ? sp.mes[0] : String(sp.mes)).slice(0, 7) : null
+
   const txList = (transacciones || []).filter(tx => {
-    if (!sp.mes) return true
-    const fechaStr = tx.fecha ? String(tx.fecha) : ''
-    return fechaStr.startsWith(sp.mes)
+    if (!mesFilter) return true
+    const fechaStr = tx.fecha ? String(tx.fecha).slice(0, 7) : ''
+    return fechaStr === mesFilter
   })
 
   const totalIngresos = txList.filter(t => t.tipo === 'ingreso').reduce((s, t) => s + Number(t.monto), 0)
