@@ -58,23 +58,22 @@ export default async function MovimientosPage({
     .select('*, cuenta:cuentas(id,nombre,icono,color,saldo_actual)')
     .eq('usuario_id', uid)
     .order('fecha', { ascending: false })
-    .limit(200)
+    .limit(500)
 
   if (sp.cuenta) query = query.eq('cuenta_id', sp.cuenta)
   if (sp.tipo && sp.tipo !== 'todos') {
     if (sp.tipo === 'gasto') query = query.in('tipo', ['gasto', 'egreso'])
     else query = query.eq('tipo', sp.tipo)
   }
-  if (sp.mes) {
-    const [y, m] = sp.mes.split('-').map(Number)
-    const nextY = m === 12 ? y + 1 : y
-    const nextM = m === 12 ? 1 : m + 1
-    const nextMes = `${nextY}-${String(nextM).padStart(2, '0')}-01`
-    query = query.gte('fecha', `${sp.mes}-01`).lt('fecha', nextMes)
-  }
 
   const { data: transacciones } = await query
-  const txList = transacciones || []
+
+  // Filtrar por mes en JS (más confiable que date filter en PostgREST)
+  const txList = (transacciones || []).filter(tx => {
+    if (!sp.mes) return true
+    const fechaStr = tx.fecha ? String(tx.fecha) : ''
+    return fechaStr.startsWith(sp.mes)
+  })
 
   const totalIngresos = txList.filter(t => t.tipo === 'ingreso').reduce((s, t) => s + Number(t.monto), 0)
   const totalGastos = txList.filter(t => t.tipo === 'gasto' || t.tipo === 'egreso').reduce((s, t) => s + Number(t.monto), 0)
