@@ -66,7 +66,7 @@ export default async function MovimientosPage({
     else query = query.eq('tipo', sp.tipo)
   }
 
-  const { data: transacciones } = await query
+  const { data: transacciones, error: txError } = await query
 
   // Filtrar por mes en JS — normalizar sp.mes a string simple
   const mesFilter = sp.mes ? (Array.isArray(sp.mes) ? sp.mes[0] : String(sp.mes)).slice(0, 7) : null
@@ -76,6 +76,17 @@ export default async function MovimientosPage({
     const fechaStr = tx.fecha ? String(tx.fecha).slice(0, 7) : ''
     return fechaStr === mesFilter
   })
+
+  // DEBUG TEMPORAL — borrar después
+  const debugInfo = {
+    uid,
+    spMes: sp.mes,
+    mesFilter,
+    totalQuery: transacciones?.length ?? 'null',
+    txListLength: txList.length,
+    txError: txError?.message ?? null,
+    primeraFecha: transacciones?.[0]?.fecha ?? 'ninguna',
+  }
 
   const totalIngresos = txList.filter(t => t.tipo === 'ingreso').reduce((s, t) => s + Number(t.monto), 0)
   const totalGastos = txList.filter(t => t.tipo === 'gasto' || t.tipo === 'egreso').reduce((s, t) => s + Number(t.monto), 0)
@@ -133,6 +144,11 @@ export default async function MovimientosPage({
           + Nuevo
         </Link>
       </div>
+
+      {/* DEBUG TEMPORAL */}
+      <pre style={{ background: '#1a1a2e', color: '#22c55e', padding: 12, borderRadius: 8, fontSize: 11, overflowX: 'auto' }}>
+        {JSON.stringify(debugInfo, null, 2)}
+      </pre>
 
       {/* Stats compactos */}
       <div className="grid-3col">
