@@ -66,8 +66,11 @@ export default async function MovimientosPage({
     else query = query.eq('tipo', sp.tipo)
   }
   if (sp.mes) {
-    // ilike funciona con date, timestamptz o text: matches "2026-04-%"
-    query = query.ilike('fecha', `${sp.mes}%`)
+    const [y, m] = sp.mes.split('-').map(Number)
+    const nextY = m === 12 ? y + 1 : y
+    const nextM = m === 12 ? 1 : m + 1
+    const nextMes = `${nextY}-${String(nextM).padStart(2, '0')}-01`
+    query = query.gte('fecha', `${sp.mes}-01`).lt('fecha', nextMes)
   }
 
   const { data: transacciones } = await query
