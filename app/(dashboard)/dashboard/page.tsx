@@ -240,18 +240,14 @@ export default async function DashboardPage() {
           </div>
           <div style={{ display: 'flex', gap: 10, overflowX: 'auto', paddingBottom: 4 }}>
             {todasCuentas.map((c: any) => (
-              <Link key={c.id} href={`/movimientos?cuenta=${c.id}`} style={{
+              <Link key={c.id} href={`/movimientos?cuenta=${c.id}`} className="account-link" style={{
                 background: 'rgba(255,255,255,0.03)',
                 border: '1px solid rgba(255,255,255,0.07)',
                 borderLeft: `3px solid ${c.color || '#4F8EF7'}`,
                 borderRadius: 12, padding: '12px 16px',
                 minWidth: 130, flexShrink: 0,
                 textDecoration: 'none', display: 'block',
-                transition: 'background 0.15s',
-              }}
-                onMouseEnter={e => { (e.currentTarget as HTMLElement).style.background = 'rgba(255,255,255,0.06)' }}
-                onMouseLeave={e => { (e.currentTarget as HTMLElement).style.background = 'rgba(255,255,255,0.03)' }}
-              >
+              }}>
                 <p style={{ fontSize: 11, color: 'rgba(248,250,252,0.4)', margin: '0 0 6px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                   {c.icono} {c.nombre}
                 </p>
