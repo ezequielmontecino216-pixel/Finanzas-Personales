@@ -16,10 +16,18 @@ interface Cuota {
   activo: boolean
 }
 
+interface Cuenta {
+  id: string
+  nombre: string
+  icono: string
+  saldo_actual: number
+}
+
 interface Props {
   cuotas: Cuota[]
   usuarioId: string
   fechaVencimiento: string
+  cuentas?: Cuenta[]
 }
 
 const fmt = (n: number) =>
@@ -33,7 +41,7 @@ const inputStyle: React.CSSProperties = {
   boxSizing: 'border-box', fontFamily: 'inherit',
 }
 
-export function CuotasCard({ cuotas: initialCuotas, usuarioId, fechaVencimiento }: Props) {
+export function CuotasCard({ cuotas: initialCuotas, usuarioId, fechaVencimiento, cuentas = [] }: Props) {
   const router = useRouter()
   const { toast } = useToast()
 
@@ -50,20 +58,30 @@ export function CuotasCard({ cuotas: initialCuotas, usuarioId, fechaVencimiento 
     nombre: '', monto_por_cuota: '', cuotas_pagadas: '0', total_cuotas: '', dia_vencimiento: '11',
   })
 
+  // Para selección de cuenta al pagar
+  const [pagandoItem, setPagandoItem] = useState<string | null>(null)
+  const [cuentaPago, setCuentaPago] = useState<string>('')
+
   // Pendientes: activas, no completadas, no pagadas esta sesión
   const esCompletada = (c: Cuota) => c.total_cuotas != null && c.cuotas_pagadas >= c.total_cuotas
   const pendientes = cuotas.filter(c => !esCompletada(c) && c.activo !== false && !pagadasSesion.has(c.id))
   const ocultas = cuotas.filter(c => esCompletada(c) || pagadasSesion.has(c.id))
   const totalMes = pendientes.reduce((s, c) => s + Number(c.monto_por_cuota), 0)
 
+  function iniciarPagoCuota(cuota: Cuota) {
+    if (paying) return
+    setPagandoItem(cuota.id)
+    setCuentaPago(cuentas.length > 0 ? cuentas[0].id : '')
+  }
+
   async function pagarCuota(cuota: Cuota) {
     if (paying) return
     setPaying(cuota.id)
+    setPagandoItem(null)
     try {
       const nuevasPagadas = cuota.cuotas_pagadas + 1
       const terminada = cuota.total_cuotas != null && nuevasPagadas >= cuota.total_cuotas
 
-      // Animación de salida
       setAnimatingOut(prev => new Set([...prev, cuota.id]))
 
       await supabase.from('cuotas').update({
@@ -71,11 +89,23 @@ export function CuotasCard({ cuotas: initialCuotas, usuarioId, fechaVencimiento 
       }).eq('id', cuota.id)
 
       await supabase.from('transacciones').insert({
-        usuario_id: usuarioId, tipo: 'gasto', subtipo: 'cuota',
+        usuario_id: usuarioId,
+        cuenta_id: cuentaPago || null,
+        tipo: 'gasto', subtipo: 'cuota',
         categoria: 'Cuota', descripcion: cuota.nombre,
         monto: cuota.monto_por_cuota, moneda: 'ARS',
         fecha: new Date().toISOString().split('T')[0], creado_por_ia: false,
       })
+
+      // Descontar de cuenta si se seleccionó
+      if (cuentaPago) {
+        const cuenta = cuentas.find(c => c.id === cuentaPago)
+        if (cuenta) {
+          await supabase.from('cuentas').update({
+            saldo_actual: Number(cuenta.saldo_actual) - Number(cuota.monto_por_cuota),
+          }).eq('id', cuentaPago)
+        }
+      }
 
       setTimeout(() => {
         setAnimatingOut(prev => { const s = new Set(prev); s.delete(cuota.id); return s })
@@ -267,53 +297,96 @@ export function CuotasCard({ cuotas: initialCuotas, usuarioId, fechaVencimiento 
               const numCuota = cuota.cuotas_pagadas + 1
               const label = cuota.total_cuotas ? `${numCuota}/${cuota.total_cuotas}` : `N° ${numCuota}`
 
+              const isSelecting = pagandoItem === cuota.id
               return (
                 <div
                   key={cuota.id}
                   className={isAnimating ? 'item-slide-out' : 'item-slide-in'}
                   style={{
-                    display: 'flex', alignItems: 'center', gap: 8,
                     padding: '9px 10px', borderRadius: 8,
                     background: 'rgba(245,158,11,0.04)',
-                    border: '1px solid rgba(245,158,11,0.1)',
-                    opacity: isDeleting ? 0.4 : 1,
+                    border: isSelecting ? '1px solid rgba(34,197,94,0.25)' : '1px solid rgba(245,158,11,0.1)',
+                    opacity: isDeleting ? 0.4 : 1, transition: 'border-color 0.15s',
                   }}
                 >
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <p style={{ fontSize: 13, fontWeight: 600, margin: 0, color: '#F8FAFC', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                      {cuota.nombre}
-                    </p>
-                    <p style={{ fontSize: 11, color: 'rgba(248,250,252,0.35)', margin: '2px 0 0' }}>
-                      Cuota {label}
-                    </p>
+                  {/* Fila principal */}
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <p style={{ fontSize: 13, fontWeight: 600, margin: 0, color: '#F8FAFC', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        {cuota.nombre}
+                      </p>
+                      <p style={{ fontSize: 11, color: 'rgba(248,250,252,0.35)', margin: '2px 0 0' }}>
+                        Cuota {label}
+                      </p>
+                    </div>
+                    <span style={{ fontSize: 13, fontWeight: 700, color: '#F59E0B', fontVariantNumeric: 'tabular-nums', flexShrink: 0 }}>
+                      {fmt(Number(cuota.monto_por_cuota))}
+                    </span>
+                    <button
+                      onClick={() => isSelecting ? setPagandoItem(null) : iniciarPagoCuota(cuota)}
+                      disabled={isPaying || isAnimating}
+                      style={{
+                        background: isSelecting ? 'rgba(34,197,94,0.15)' : 'rgba(34,197,94,0.08)',
+                        border: isSelecting ? '1px solid rgba(34,197,94,0.4)' : '1px solid rgba(34,197,94,0.2)',
+                        borderRadius: 6, padding: '3px 9px', fontSize: 11, fontWeight: 600,
+                        color: '#22c55e', cursor: 'pointer', fontFamily: 'inherit',
+                        flexShrink: 0, opacity: isPaying ? 0.5 : 1, transition: 'all 0.15s',
+                      }}
+                    >
+                      {isSelecting ? '✕' : '✓ Pagar'}
+                    </button>
+                    <button
+                      onClick={() => eliminarCuota(cuota.id)} disabled={isDeleting}
+                      style={{
+                        background: 'transparent', border: 'none', cursor: isDeleting ? 'not-allowed' : 'pointer',
+                        color: 'rgba(248,250,252,0.18)', padding: '2px', borderRadius: 4,
+                        display: 'flex', alignItems: 'center', flexShrink: 0,
+                      }}
+                      onMouseEnter={e => (e.currentTarget.style.color = '#ef4444')}
+                      onMouseLeave={e => (e.currentTarget.style.color = 'rgba(248,250,252,0.18)')}
+                    >
+                      <Trash2 size={13} />
+                    </button>
                   </div>
-                  <span style={{ fontSize: 13, fontWeight: 700, color: '#F59E0B', fontVariantNumeric: 'tabular-nums', flexShrink: 0 }}>
-                    {fmt(Number(cuota.monto_por_cuota))}
-                  </span>
-                  <button
-                    onClick={() => pagarCuota(cuota)}
-                    disabled={isPaying || isAnimating}
-                    style={{
-                      background: 'rgba(34,197,94,0.08)', border: '1px solid rgba(34,197,94,0.2)',
-                      borderRadius: 6, padding: '3px 9px', fontSize: 11, fontWeight: 600,
-                      color: '#22c55e', cursor: 'pointer', fontFamily: 'inherit',
-                      flexShrink: 0, opacity: isPaying ? 0.5 : 1, transition: 'all 0.15s',
-                    }}
-                  >
-                    ✓ Pagar
-                  </button>
-                  <button
-                    onClick={() => eliminarCuota(cuota.id)} disabled={isDeleting}
-                    style={{
-                      background: 'transparent', border: 'none', cursor: isDeleting ? 'not-allowed' : 'pointer',
-                      color: 'rgba(248,250,252,0.18)', padding: '2px', borderRadius: 4,
-                      display: 'flex', alignItems: 'center', flexShrink: 0,
-                    }}
-                    onMouseEnter={e => (e.currentTarget.style.color = '#ef4444')}
-                    onMouseLeave={e => (e.currentTarget.style.color = 'rgba(248,250,252,0.18)')}
-                  >
-                    <Trash2 size={13} />
-                  </button>
+
+                  {/* Selector de cuenta inline */}
+                  {isSelecting && (
+                    <div style={{ marginTop: 10, display: 'flex', flexDirection: 'column', gap: 8 }}>
+                      <p style={{ fontSize: 11, color: 'rgba(248,250,252,0.4)', margin: 0, fontWeight: 600 }}>
+                        ¿Desde qué cuenta?
+                      </p>
+                      <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap' }}>
+                        <button type="button" onClick={() => setCuentaPago('')}
+                          style={{
+                            padding: '5px 10px', borderRadius: 99, fontSize: 11, fontWeight: 600,
+                            cursor: 'pointer', fontFamily: 'inherit',
+                            background: cuentaPago === '' ? 'rgba(248,250,252,0.1)' : 'rgba(255,255,255,0.03)',
+                            border: cuentaPago === '' ? '1px solid rgba(255,255,255,0.25)' : '1px solid rgba(255,255,255,0.08)',
+                            color: cuentaPago === '' ? '#F8FAFC' : 'rgba(248,250,252,0.4)',
+                          }}>Sin cuenta</button>
+                        {cuentas.map(c => (
+                          <button key={c.id} type="button" onClick={() => setCuentaPago(c.id)}
+                            style={{
+                              padding: '5px 10px', borderRadius: 99, fontSize: 11, fontWeight: 600,
+                              cursor: 'pointer', fontFamily: 'inherit',
+                              background: cuentaPago === c.id ? 'rgba(34,197,94,0.12)' : 'rgba(255,255,255,0.03)',
+                              border: cuentaPago === c.id ? '1px solid rgba(34,197,94,0.35)' : '1px solid rgba(255,255,255,0.08)',
+                              color: cuentaPago === c.id ? '#22c55e' : 'rgba(248,250,252,0.4)',
+                            }}>
+                            {c.icono} {c.nombre}
+                          </button>
+                        ))}
+                      </div>
+                      <button onClick={() => pagarCuota(cuota)} disabled={isPaying}
+                        style={{
+                          background: '#22c55e', color: '#000', border: 'none', borderRadius: 8,
+                          padding: '8px', fontSize: 12, fontWeight: 700, fontFamily: 'inherit',
+                          cursor: isPaying ? 'not-allowed' : 'pointer', opacity: isPaying ? 0.5 : 1,
+                        }}>
+                        {isPaying ? 'Guardando...' : '✓ Confirmar pago'}
+                      </button>
+                    </div>
+                  )}
                 </div>
               )
             })

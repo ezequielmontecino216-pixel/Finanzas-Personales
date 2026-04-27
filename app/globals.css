@@ -122,6 +122,21 @@ input:focus, select:focus, textarea:focus {
   box-shadow: 0 0 0 3px rgba(79,142,247,0.12);
 }
 
+/* ─── SELECT DARK OPTIONS (fix white background on open) ─────────────────── */
+select {
+  color-scheme: dark;
+}
+select option {
+  background-color: #1a2035;
+  color: #F8FAFC;
+}
+select option:hover,
+select option:focus,
+select option:checked {
+  background-color: #1f2847;
+  color: #F8FAFC;
+}
+
 /* ─── BUTTONS ────────────────────────────────────────────────────────────── */
 .btn-primary {
   background: var(--accent);
